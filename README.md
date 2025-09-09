@@ -13,4 +13,4 @@ Invite it to the channels where you want to fetch messages.
 
 Add your Bot User OAuth Token to the .env file.
 
-Run `slack_dump.py`
+Run `fetch_messages.py`
