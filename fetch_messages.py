@@ -10,7 +10,7 @@ SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 client = WebClient(token=SLACK_BOT_TOKEN)
 
 
-DUMP_DIR = "slack_dump"
+DUMP_DIR = "messages"
 os.makedirs(DUMP_DIR, exist_ok=True)
 
 
