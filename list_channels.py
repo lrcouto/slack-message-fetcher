@@ -3,8 +3,10 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from dotenv import load_dotenv
 
+
 load_dotenv()
 client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+
 
 def list_channels():
     channels = []
@@ -21,6 +23,7 @@ def list_channels():
             break
     for ch in channels:
         print(f"{ch['id']}  #{ch.get('name') or ch.get('name_normalized')}  (is_private={ch['is_private']})")
+
 
 if __name__ == "__main__":
     try:

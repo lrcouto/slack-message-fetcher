@@ -4,12 +4,15 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from dotenv import load_dotenv
 
+
 load_dotenv()
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 client = WebClient(token=SLACK_BOT_TOKEN)
 
+
 DUMP_DIR = "slack_dump"
 os.makedirs(DUMP_DIR, exist_ok=True)
+
 
 def fetch_channels():
     """Fetch list of channels (public + private if accessible)."""
@@ -19,6 +22,7 @@ def fetch_channels():
     except SlackApiError as e:
         print(f"Error fetching channels: {e}")
         return []
+
 
 def fetch_messages(channel_id):
     """Fetch messages from a channel the bot has access to."""
@@ -33,6 +37,7 @@ def fetch_messages(channel_id):
         else:
             raise  # re-raise unexpected errors
 
+
 def save_messages(channel_name, messages):
     """Save messages to slack_dump/<channel_name>.json"""
     filename = os.path.join(DUMP_DIR, f"{channel_name}.json")
@@ -40,16 +45,18 @@ def save_messages(channel_name, messages):
         json.dump(messages, f, indent=2, ensure_ascii=False)
     print(f"Saved {len(messages)} messages to {filename}")
 
+
 def main():
     channels = fetch_channels()
     for channel in channels:
-        cid = channel["id"]
-        cname = channel["name"]
-        print(f"\n=== Fetching messages from #{cname} ===")
-        messages = fetch_messages(cid)
+        channel_id = channel["id"]
+        channel_name = channel["name"]
+        print(f"\n=== Fetching messages from #{channel_name} ===")
+        messages = fetch_messages(channel_id)
         print(f"Retrieved {len(messages)} messages")
         if messages:
-            save_messages(cname, messages)
+            save_messages(channel_name, messages)
+
 
 if __name__ == "__main__":
     main()
