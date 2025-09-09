@@ -1,145 +1,55 @@
-import json
 import os
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-
-from dotenv import load_dotenv
+import json
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
-from tqdm import tqdm
+from dotenv import load_dotenv
 
 load_dotenv()
-TOKEN = os.environ["SLACK_BOT_TOKEN"]
-client = WebClient(token=TOKEN)
+SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
+client = WebClient(token=SLACK_BOT_TOKEN)
 
-EXPORT_DIR = Path("slack_export")
-EXPORT_DIR.mkdir(exist_ok=True)
+DUMP_DIR = "slack_dump"
+os.makedirs(DUMP_DIR, exist_ok=True)
 
-def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-def rate_limit_sleep(e: SlackApiError):
-    # If ratelimited, Slack sends HTTP 429 + Retry-After header
+def fetch_channels():
+    """Fetch list of channels (public + private if accessible)."""
     try:
-        retry_after = int(getattr(e.response, "headers", {}).get("Retry-After", "1"))
-    except Exception:
-        retry_after = 1
-    time.sleep(retry_after + 1)
-
-@retry(
-    retry=retry_if_exception_type(SlackApiError),
-    wait=wait_exponential(multiplier=1, min=1, max=20),
-    stop=stop_after_attempt(5)
-)
-def call_with_retry(func, **kwargs):
-    try:
-        return func(**kwargs)
+        result = client.conversations_list(types="public_channel,private_channel")
+        return result["channels"]
     except SlackApiError as e:
-        if e.response is not None and getattr(e.response, "status_code", None) == 429:
-            rate_limit_sleep(e)
-        raise
+        print(f"Error fetching channels: {e}")
+        return []
 
-def list_all_channels():
-    channels = []
-    cursor = None
-    while True:
-        resp = call_with_retry(
-            client.conversations_list,
-            types="public_channel,private_channel",
-            limit=200,
-            cursor=cursor
-        )
-        channels.extend(resp["channels"])
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-        time.sleep(0.5)  # gentle pacing
-    return channels
+def fetch_messages(channel_id):
+    """Fetch messages from a channel the bot has access to."""
+    try:
+        result = client.conversations_history(channel=channel_id)
+        return result["messages"]
+    except SlackApiError as e:
+        # Ignore if bot is not in channel or lacks permission
+        if e.response["error"] in ["not_in_channel", "missing_scope"]:
+            print(f"Skipping channel {channel_id}: {e.response['error']}")
+            return []
+        else:
+            raise  # re-raise unexpected errors
 
-def fetch_channel_history(channel_id):
-    """Fetch all top-level messages for a channel (no replies yet)."""
-    messages = []
-    cursor = None
-    while True:
-        resp = call_with_retry(
-            client.conversations_history,
-            channel=channel_id,
-            limit=200,
-            cursor=cursor
-        )
-        messages.extend(resp["messages"])
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-        time.sleep(0.5)
-    return messages
-
-def fetch_thread_replies(channel_id, thread_ts):
-    """Fetch a full thread given its root ts."""
-    replies = []
-    cursor = None
-    while True:
-        resp = call_with_retry(
-            client.conversations_replies,
-            channel=channel_id,
-            ts=thread_ts,
-            limit=200,
-            cursor=cursor
-        )
-        # API returns the root message as the first element; keep full set.
-        replies.extend(resp["messages"])
-        cursor = resp.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            break
-        time.sleep(0.5)
-    return replies
-
-def enrich_with_threads(channel_id, messages):
-    """Attach full thread messages to each thread root as msg['replies']."""
-    for msg in messages:
-        if "thread_ts" in msg and msg.get("ts") == msg.get("thread_ts"):
-            replies = fetch_thread_replies(channel_id, msg["thread_ts"])
-            msg["replies"] = replies
-            time.sleep(0.3)
-    return messages
-
-def dump_channel(channel, run_stamp):
-    channel_id = channel["id"]
-    channel_name = channel.get("name") or channel.get("name_normalized") or channel_id
-    print(f"\nDumping #{channel_name} ({channel_id}) ...")
-
-    messages = fetch_channel_history(channel_id)
-    messages = enrich_with_threads(channel_id, messages)
-
-    out = {
-        "channel_id": channel_id,
-        "channel_name": channel_name,
-        "is_private": channel.get("is_private", False),
-        "fetched_at": iso_now(),
-        "message_count": len(messages),
-        "messages": messages,
-    }
-
-    # Write a timestamped snapshot per run
-    chan_dir = EXPORT_DIR / channel_name
-    chan_dir.mkdir(parents=True, exist_ok=True)
-    out_path = chan_dir / f"{run_stamp}.json"
-    with out_path.open("w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
-    print(f"Saved {len(messages)} messages -> {out_path}")
+def save_messages(channel_name, messages):
+    """Save messages to slack_dump/<channel_name>.json"""
+    filename = os.path.join(DUMP_DIR, f"{channel_name}.json")
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(messages, f, indent=2, ensure_ascii=False)
+    print(f"Saved {len(messages)} messages to {filename}")
 
 def main():
-    run_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    channels = list_all_channels()
-    print(f"Found {len(channels)} channels.")
-    for ch in tqdm(channels, desc="Channels"):
-        try:
-            dump_channel(ch, run_stamp)
-        except SlackApiError as e:
-            err = e.response.get("error") if e.response else str(e)
-            print(f"Error dumping channel {ch.get('name')}: {err}")
+    channels = fetch_channels()
+    for channel in channels:
+        cid = channel["id"]
+        cname = channel["name"]
+        print(f"\n=== Fetching messages from #{cname} ===")
+        messages = fetch_messages(cid)
+        print(f"Retrieved {len(messages)} messages")
+        if messages:
+            save_messages(cname, messages)
 
 if __name__ == "__main__":
     main()
