@@ -39,7 +39,7 @@ def fetch_messages(channel_id):
 
 
 def save_messages(channel_name, messages):
-    """Save messages to slack_dump/<channel_name>.json"""
+    """Save messages to messages/<channel_name>.json"""
     filename = os.path.join(DUMP_DIR, f"{channel_name}.json")
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(messages, f, indent=2, ensure_ascii=False)
