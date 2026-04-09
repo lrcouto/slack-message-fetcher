@@ -9,6 +9,7 @@ client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
 
 def list_channels():
+    """List all channels in the workspace."""
     channels = []
     cursor = None
     while True:
